@@ -1,12 +1,87 @@
-# app.py
 import streamlit as st
-from data import fetch_price_data, fetch_news_data
-from sentiment import perform_sentiment_analysis
-from model import train_model, create_dataset
-from risk import calculate_volatility, calculate_sharpe_ratio
-from backtesting import backtest_strategy
+import pandas as pd
+import yfinance as yf
 import numpy as np
+import requests
 from datetime import datetime, timedelta
+from textblob import TextBlob
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
+
+# Function to fetch historical price data
+@st.cache_data(ttl=3600)  # Cache data for 1 hour
+def fetch_price_data(ticker, start_date, end_date):
+    data = yf.download(ticker, start=start_date, end=end_date)
+    data.reset_index(inplace=True)
+    return data
+
+# Function to fetch news data
+@st.cache_data(ttl=3600)  # Cache data for 1 hour
+def fetch_news_data(query, start_date, end_date):
+    url = f"https://newsapi.org/v2/everything?q={query}&from={start_date}&to={end_date}&sortBy=publishedAt&apiKey=1fae5448214f47b7a22e6f09117226dd"
+    response = requests.get(url)
+    data = response.json()
+    if 'articles' in data:
+        articles = data['articles']
+        df = pd.DataFrame(articles, columns=["publishedAt", "title", "description"])
+        df["publishedAt"] = pd.to_datetime(df["publishedAt"])
+        return df
+    else:
+        return pd.DataFrame(columns=["publishedAt", "title", "description"])
+
+# Function to perform sentiment analysis
+def perform_sentiment_analysis(text):
+    blob = TextBlob(text)
+    return blob.sentiment.polarity
+
+# Function to create dataset for model training
+def create_dataset(data, lookback):
+    X, Y = [], []
+    for i in range(len(data) - lookback):
+        X.append(data[i:(i + lookback)])
+        Y.append(data[i + lookback])
+    return np.array(X), np.array(Y)
+
+# Function to train the LSTM model
+@st.cache_resource  # Cache the model object
+def train_model(data, lookback):
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data.reshape(-1, 1))
+
+    X, Y = create_dataset(scaled_data, lookback)
+
+    model = Sequential([
+        LSTM(50, return_sequences=True, input_shape=(lookback, 1)),
+        LSTM(50),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, Y, epochs=10, batch_size=32, verbose=0)  # Set verbose to 0 to suppress training output
+
+    return model, scaler
+
+# Function to calculate volatility
+@st.cache_data  # Cache the volatility calculation
+def calculate_volatility(data, window):
+    returns = data.pct_change()
+    volatility = returns.rolling(window=window).std() * np.sqrt(window)
+    return volatility
+
+# Function to calculate Sharpe ratio
+@st.cache_data  # Cache the Sharpe ratio calculation
+def calculate_sharpe_ratio(data, risk_free_rate, window):
+    returns = data.pct_change()
+    excess_returns = returns - risk_free_rate / 252
+    sharpe_ratio = excess_returns.rolling(window=window).mean() / calculate_volatility(data, window)
+    return sharpe_ratio
+
+# Function to backtest a strategy
+@st.cache_data  # Cache the backtesting results
+def backtest_strategy(data, strategy_func, initial_capital):
+    positions = strategy_func(data)
+    portfolio_value = initial_capital * (1 + positions.shift(1) * data.pct_change()).cumprod()
+    return portfolio_value
 
 def main():
     st.title("Cryptocurrency Price Prediction and Analysis")
