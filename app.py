@@ -1,79 +1,69 @@
+# app.py
 import streamlit as st
-import pandas as pd
+from data import fetch_price_data, fetch_news_data
+from sentiment import perform_sentiment_analysis
+from model import train_model, create_dataset
+from risk import calculate_volatility, calculate_sharpe_ratio
+from backtesting import backtest_strategy
 import numpy as np
-from streamlit import cache
-from data import fetch_price_data, preprocess_data, fetch_news_data, preprocess_news_data, perform_sentiment_analysis
-from model import train_model, calculate_volatility, calculate_sharpe_ratio, backtest_strategy
-
-@st.cache_data  # Use for data computations
-def fetch_and_preprocess_price_data(coin_id, days):
-    btc_data = fetch_price_data(coin_id, days)
-    btc_df = preprocess_data(btc_data)
-    return btc_df
-
-@st.cache_data  # Use for data computations including ML models
-def train_price_prediction_model(data, lookback):
-    model, scaler = train_model(data, lookback)
-    return model, scaler
-
-@st.cache_data  # Use for data computations
-def fetch_and_preprocess_news_data(coin_name, days):
-    news_data = fetch_news_data(coin_name, days)
-    news_df = preprocess_news_data(news_data)
-    return news_df
-
-def sma_strategy(data, short_window=10, long_window=30):
-    short_sma = data.rolling(window=short_window).mean()
-    long_sma = data.rolling(window=long_window).mean()
-    positions = np.where(short_sma > long_sma, 1, -1)
-    return pd.Series(positions, index=data.index)
+from datetime import datetime, timedelta
 
 def main():
     st.title("Cryptocurrency Price Prediction and Analysis")
-    st.write("This application predicts the price of Bitcoin (BTC) for the next day and provides sentiment analysis, risk management, and backtesting.")
 
-    # Fetch and preprocess data
-    btc_df = fetch_and_preprocess_price_data("bitcoin", 365)
-    news_df = fetch_and_preprocess_news_data("bitcoin", 7)
+    # Sidebar inputs
+    ticker = st.sidebar.text_input("Enter cryptocurrency ticker (e.g., BTC-USD)", "BTC-USD")
+    start_date = st.sidebar.date_input("Start date", datetime.now() - timedelta(days=365))
+    end_date = st.sidebar.date_input("End date", datetime.now())
+    lookback = st.sidebar.slider("Lookback period (days)", 1, 60, 30)
+    risk_free_rate = st.sidebar.slider("Risk-free rate (%)", 0.0, 10.0, 2.0) / 100
 
-    # Display historical price chart
-    st.subheader("Historical Price Chart")
-    st.line_chart(btc_df["Price"])
+    if ticker:
+        # Fetch and preprocess data
+        with st.spinner("Fetching data..."):
+            price_data = fetch_price_data(ticker, start_date, end_date)
+            news_data = fetch_news_data(ticker.split("-")[0], start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d"))
 
-    # Train the model
-    lookback = 30
-    model, scaler = train_price_prediction_model(btc_df["Price"], lookback)
+        # Display historical price chart
+        st.subheader("Historical Price Chart")
+        st.line_chart(price_data["Close"])
 
-    # Predict the price for the next day
-    last_price = btc_df["Price"].iloc[-1]
-    last_data = scaler.transform(btc_df["Price"].values.reshape(-1, 1))[-lookback:]
-    predicted_price = model.predict(last_data.reshape(1, lookback, 1))
-    predicted_price = scaler.inverse_transform(predicted_price)[0][0]
+        # Train the model
+        with st.spinner("Training model..."):
+            model, scaler = train_model(price_data["Close"].values, lookback)
 
-    st.subheader("Price Prediction")
-    st.write(f"Last Price: ${last_price:.2f}")
-    st.write(f"Predicted Price (Next Day): ${predicted_price:.2f}")
+        # Predict the price for the next day
+        last_price = price_data["Close"].iloc[-1]
+        last_data = scaler.transform(price_data["Close"].values[-lookback:].reshape(-1, 1))
+        predicted_price = model.predict(last_data.reshape(1, lookback, 1))
+        predicted_price = scaler.inverse_transform(predicted_price)[0][0]
 
-    # Perform sentiment analysis
-    news_df["sentiment"] = news_df["title"].apply(perform_sentiment_analysis)
+        st.subheader("Price Prediction")
+        st.write(f"Last Price: ${last_price:.2f}")
+        st.write(f"Predicted Price (Next Day): ${predicted_price:.2f}")
 
-    st.subheader("Sentiment Analysis")
-    sentiment_score = news_df["sentiment"].mean()
-    st.write(f"Sentiment Score: {sentiment_score:.2f}")
+        # Perform sentiment analysis
+        with st.spinner("Analyzing sentiment..."):
+            news_data["sentiment"] = news_data["title"].apply(perform_sentiment_analysis)
 
-    # Calculate volatility and Sharpe ratio
-    volatility = calculate_volatility(btc_df["Price"], window=30)
-    sharpe_ratio = calculate_sharpe_ratio(btc_df["Price"], risk_free_rate=0.02, window=30)
+        st.subheader("Sentiment Analysis")
+        sentiment_score = news_data["sentiment"].mean()
+        st.write(f"Sentiment Score: {sentiment_score:.2f}")
 
-    st.subheader("Risk Management")
-    st.write(f"Volatility (30-day): {volatility.iloc[-1]:.4f}")
-    st.write(f"Sharpe Ratio (30-day): {sharpe_ratio.iloc[-1]:.2f}")
+        # Calculate volatility and Sharpe ratio
+        volatility = calculate_volatility(price_data["Close"], window=30)
+        sharpe_ratio = calculate_sharpe_ratio(price_data["Close"], risk_free_rate, window=30)
 
-    # Backtest a simple moving average strategy
-    portfolio_value = backtest_strategy(btc_df["Price"], strategy_func=sma_strategy, initial_capital=10000)
+        st.subheader("Risk Management")
+        st.write(f"Volatility (30-day): {volatility.iloc[-1]:.4f}")
+        st.write(f"Sharpe Ratio (30-day): {sharpe_ratio.iloc[-1]:.2f}")
 
-    st.subheader("Backtesting")
-    st.line_chart(portfolio_value)
+        # Backtest a simple moving average strategy
+        sma_strategy = lambda data: data.rolling(window=30).mean() > data.rolling(window=90).mean()
+        portfolio_value = backtest_strategy(price_data["Close"], strategy_func=sma_strategy, initial_capital=10000)
+
+        st.subheader("Backtesting")
+        st.line_chart(portfolio_value)
 
     st.warning("Disclaimer: This application is for educational purposes only and should not be used for making actual financial decisions.")
 
