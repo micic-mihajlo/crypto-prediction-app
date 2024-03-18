@@ -1,22 +1,22 @@
 import streamlit as st
-from data import fetch_price_data, preprocess_data, fetch_news_data, preprocess_news_data, perform_sentiment_analysis
-from model import train_model, calculate_volatility, calculate_sharpe_ratio, backtest_strategy
 import pandas as pd
 import numpy as np
+from streamlit import cache
+from data import fetch_price_data, preprocess_data, fetch_news_data, preprocess_news_data, perform_sentiment_analysis
+from model import train_model, calculate_volatility, calculate_sharpe_ratio, backtest_strategy
 
-# Apply Streamlit caching to expensive operations like data fetching, preprocessing, and model training.
-@st.cache(show_spinner=False, suppress_st_warning=True)
+@st.cache_data  # Use for data computations
 def fetch_and_preprocess_price_data(coin_id, days):
     btc_data = fetch_price_data(coin_id, days)
     btc_df = preprocess_data(btc_data)
     return btc_df
 
-@st.cache(show_spinner=False, suppress_st_warning=True, allow_output_mutation=True)
+@st.cache_data  # Use for data computations including ML models
 def train_price_prediction_model(data, lookback):
     model, scaler = train_model(data, lookback)
     return model, scaler
 
-@st.cache(show_spinner=False, suppress_st_warning=True)
+@st.cache_data  # Use for data computations
 def fetch_and_preprocess_news_data(coin_name, days):
     news_data = fetch_news_data(coin_name, days)
     news_df = preprocess_news_data(news_data)
@@ -32,14 +32,9 @@ def main():
     st.title("Cryptocurrency Price Prediction and Analysis")
     st.write("This application predicts the price of Bitcoin (BTC) for the next day and provides sentiment analysis, risk management, and backtesting.")
 
-    # Input for cryptocurrency selection
-    coin_id = st.selectbox("Select Cryptocurrency", options=["bitcoin", "ethereum", "litecoin"], index=0)
-    days_price_data = 365
-    days_news_data = 30
-
     # Fetch and preprocess data
-    btc_df = fetch_and_preprocess_price_data(coin_id, days_price_data)
-    news_df = fetch_and_preprocess_news_data(coin_id, days_news_data)
+    btc_df = fetch_and_preprocess_price_data("bitcoin", 365)
+    news_df = fetch_and_preprocess_news_data("bitcoin", 7)
 
     # Display historical price chart
     st.subheader("Historical Price Chart")
@@ -47,14 +42,16 @@ def main():
 
     # Train the model
     lookback = 30
-    model, scaler = train_price_prediction_model(btc_df[["Price"]], lookback)
+    model, scaler = train_price_prediction_model(btc_df["Price"], lookback)
 
     # Predict the price for the next day
+    last_price = btc_df["Price"].iloc[-1]
     last_data = scaler.transform(btc_df["Price"].values.reshape(-1, 1))[-lookback:]
     predicted_price = model.predict(last_data.reshape(1, lookback, 1))
     predicted_price = scaler.inverse_transform(predicted_price)[0][0]
 
     st.subheader("Price Prediction")
+    st.write(f"Last Price: ${last_price:.2f}")
     st.write(f"Predicted Price (Next Day): ${predicted_price:.2f}")
 
     # Perform sentiment analysis

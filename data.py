@@ -16,17 +16,21 @@ def preprocess_data(data):
     return df
 
 def fetch_news_data(coin_name, days):
-    url = f"https://newsapi.org/v2/everything?q={coin_name}&from={pd.Timestamp.now() - pd.Timedelta(days=days):%Y-%m-%d}&sortBy=publishedAt&apiKey=YOUR_NEWS_API_KEY"
+    url = f"https://newsapi.org/v2/everything?q={coin_name}&from={pd.Timestamp.now() - pd.Timedelta(days=days):%Y-%m-%d}&sortBy=publishedAt&apiKey=1fae5448214f47b7a22e6f09117226dd"
     response = requests.get(url)
     data = response.json()
     return data
 
 def preprocess_news_data(data):
-    articles = data["articles"]
-    df = pd.DataFrame(articles, columns=["publishedAt", "title", "description"])
-    df["publishedAt"] = pd.to_datetime(df["publishedAt"])
-    df.set_index("publishedAt", inplace=True)
-    return df
+    if 'articles' in data:
+        articles = data['articles']
+        df = pd.DataFrame(articles, columns=["publishedAt", "title", "description"])
+        df["publishedAt"] = pd.to_datetime(df["publishedAt"])
+        df.set_index("publishedAt", inplace=True)
+        return df
+    else:
+        # Handle the case where 'articles' key is missing, return an empty DataFrame
+        return pd.DataFrame(columns=["publishedAt", "title", "description"])
 
 def perform_sentiment_analysis(text):
     blob = TextBlob(text)

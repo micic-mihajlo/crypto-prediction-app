@@ -6,23 +6,24 @@ from keras.layers import LSTM, Dense
 def create_dataset(data, lookback):
     X, Y = [], []
     for i in range(len(data) - lookback):
-        X.append(data[i:i+lookback])
-        Y.append(data[i+lookback])
+        X.append(data[i:(i + lookback)])
+        Y.append(data[i + lookback])
     return np.array(X), np.array(Y)
 
 def train_model(data, lookback):
-    scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(data.values.reshape(-1, 1))
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    # Directly transform 'data' without using '.values'
+    scaled_data = scaler.fit_transform(data.reshape(-1, 1))
 
     X, Y = create_dataset(scaled_data, lookback)
 
-    model = Sequential()
-    model.add(LSTM(50, return_sequences=True, input_shape=(lookback, 1)))
-    model.add(LSTM(50))
-    model.add(Dense(1))
-
-    model.compile(loss="mean_squared_error", optimizer="adam")
-    model.fit(X, Y, epochs=100, batch_size=32, verbose=1)
+    model = Sequential([
+        LSTM(50, return_sequences=True, input_shape=(lookback, 1)),
+        LSTM(50),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    model.fit(X, Y, epochs=5, batch_size=32, verbose=1)  # Adjust epochs for your needs
 
     return model, scaler
 
